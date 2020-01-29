@@ -1,0 +1,25 @@
+syntax = "proto3";
+package pcol;
+
+message Frame {
+    int32 messageId = 1;
+    bytes data = 2;
+}
+
+// Server => Client
+
+message RecvChat {
+    string username = 1;
+    string message = 2;
+}
+
+// Client => Server
+
+message RegisterClient {
+    string name = 1;
+    int32 version = 2;
+}
+
+message SendChat {
+    string message = 1;
+}
