@@ -1,14 +1,37 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
-	"github.com/ethanent/gochat/pcol"
-	"github.com/golang/protobuf/proto"
 	"io"
 	"net"
+	"os"
+	"os/user"
+
+	"github.com/fatih/color"
+
+	"github.com/ethanent/protostream"
+
+	"github.com/ethanent/gochat/pcol"
+	"github.com/golang/protobuf/proto"
 )
 
 func connServer(addr string) {
+	// If unset connAddr, have user choose one
+
+	if addr == "undefined" {
+		fmt.Println("Input connAddr:")
+		_, err := fmt.Scanln(&addr)
+
+		if err != nil {
+			panic(err)
+		}
+
+		fmt.Println("Connecting...")
+	}
+
+	// Connect
+
 	conn, err := net.Dial("tcp", addr)
 
 	if err != nil {
@@ -18,71 +41,84 @@ func connServer(addr string) {
 
 	fmt.Println("> Conn established")
 
-	go handleIncoming(conn)
+	// Set up stream
 
-	regMsg, err := proto.Marshal(&pcol.RegisterClient{
-		Name: "Ethan",
+	stream := factory.CreateStream()
+
+	stream.Out(conn)
+
+	stream.Subscribe(&pcol.RecvChat{}, func(msg proto.Message) {
+		data := msg.(*pcol.RecvChat)
+
+		color.Set(color.FgCyan)
+
+		fmt.Print(data.Username)
+
+		color.Unset()
+
+		fmt.Println(":", data.Message)
 	})
 
-	if err != nil {
-		panic(err)
-	}
+	stream.Subscribe(&pcol.RecvBroadcast{}, func(msg proto.Message) {
+		data := msg.(*pcol.RecvBroadcast)
 
-	msgFrame, err := proto.Marshal(&pcol.Frame{
-		MessageId: 0,
-		Data:      regMsg,
+		fmt.Println("RECV BCAST")
+
+		fmt.Print("[")
+
+		color.Set(color.FgBlue)
+
+		fmt.Print(data.Sender)
+
+		color.Unset()
+
+		fmt.Print("] ")
+
+		fmt.Println(data.Message)
 	})
 
-	if err != nil {
-		panic(err)
-	}
+	// Register to conn
 
-	conn.Write(msgFrame)
-}
+	registerConn(stream)
 
-func handleIncoming(conn net.Conn) {
-	ob := []byte{}
+	// Begin copying conn data to stream
+
+	go startCopy(stream, conn)
+
+	// Handle user input
+
+	buffer := bufio.NewReader(os.Stdin)
 
 	for {
-		rb := make([]byte, 8)
-
-		c, err := conn.Read(rb)
+		line, _, err := buffer.ReadLine()
 
 		if err != nil {
-			if err == io.EOF {
-				fmt.Println("Server has closed.")
-				panic("Server closed.")
-			}
-
 			panic(err)
 		}
 
-		ob = append(ob, rb[:c]...)
-
-		f := pcol.Frame{}
-
-		err = proto.Unmarshal(ob, &f)
-
-		if err != nil {
-			// Full frame has not been buffered
-			continue
-		}
-
-		pf := getProto(int(f.MessageId))
-
-		err = proto.Unmarshal(f.Data, pf)
-
-		if err != nil {
-			fmt.Println("Server provided malformatted message")
-			panic(err)
-		}
-
-		// Clear unread portion of ob
-
-		ob = ob[:f.XXX_Size()]
-
-		// Handle msg
-
-		fmt.Println(f.MessageId, pf)
+		stream.Push(&pcol.SendChat{
+			Message: string(line),
+		})
 	}
+}
+
+func startCopy(stream *protostream.Stream, conn net.Conn) {
+	_, err := io.Copy(stream, conn)
+
+	fmt.Println("Connection closed.", err)
+
+	os.Exit(0)
+}
+
+func registerConn(stream *protostream.Stream) {
+	user, err := user.Current()
+
+	if err != nil {
+		panic(err)
+	}
+
+	stream.Push(&pcol.RegisterClient{
+		Name:    user.Name,
+		Version: 1,
+	})
 }

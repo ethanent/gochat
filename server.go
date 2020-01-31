@@ -2,15 +2,19 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net"
 
-	"github.com/ethanent/gochat/pcol"
 	"github.com/golang/protobuf/proto"
+
+	"github.com/ethanent/gochat/pcol"
+	"github.com/ethanent/protostream"
 )
 
 type Session struct {
-	name *string
-	conn net.Conn
+	name   *string
+	conn   net.Conn
+	stream *protostream.Stream
 }
 
 var sessions []Session = []Session{}
@@ -36,64 +40,74 @@ func hostServer() {
 }
 
 func handleConn(conn net.Conn) {
+	stream := factory.CreateStream()
+
+	stream.Out(conn)
+
 	session := Session{
-		name: nil,
-		conn: conn,
+		name:   nil,
+		conn:   conn,
+		stream: stream,
 	}
 
-	frb := []byte{}
+	sessions = append(sessions, session)
 
-	for {
-		rb := make([]byte, 8)
-		c, err := conn.Read(rb)
+	stream.Subscribe(&pcol.RegisterClient{}, func(data proto.Message) {
+		parsed := data.(*pcol.RegisterClient)
 
-		if err != nil {
-			// Drop session
+		session.name = &parsed.Name
 
-			for idx, sess := range sessions {
-				if sess == session {
-					sessions = append(sessions[:idx], sessions[idx+1:]...)
-					break
-				}
-			}
+		for _, sess := range sessions {
+			sess.stream.Push(&pcol.RecvBroadcast{
+				Sender:  "Server",
+				Message: *session.name + " has entered the chat",
+			})
+		}
 
-			fmt.Println("Dropping conn", err)
+		fmt.Println(parsed.Name, "registered")
+	})
 
+	stream.Subscribe(&pcol.SendChat{}, func(data proto.Message) {
+		parsed := data.(*pcol.SendChat)
+
+		if session.name == nil {
+			stream.Push(&pcol.RecvChat{
+				Username: "Server",
+				Message:  "Failed to send message. Client has not registered.",
+			})
+		}
+
+		fmt.Println(*session.name, ":", parsed.Message)
+
+		// Broadcast message
+
+		for _, sess := range sessions {
+			sess.stream.Push(&pcol.RecvChat{
+				Username: *session.name,
+				Message:  parsed.Message,
+			})
+		}
+	})
+
+	// Start copying conn data to stream
+
+	_, err := io.Copy(stream, conn)
+
+	// Conn ended probably
+
+	fmt.Println("Terminating conn", err)
+
+	conn.Close()
+
+	// Remove session from list
+
+	for i, sess := range sessions {
+		if sess == session {
+			sessions = append(sessions[0:i], sessions[i+1:]...)
+			fmt.Println("Session dropped successfully!")
 			return
 		}
-
-		frb = append(frb, rb[:c]...)
-
-		// Parse frame if possible
-
-		f := pcol.Frame{}
-
-		err = proto.Unmarshal(frb, &f)
-
-		if err != nil {
-			// Frame not fully buffered
-			continue
-		}
-
-		// Clear read from main buffer
-
-		frb = frb[:f.XXX_Size()]
-
-		// Get a relevant proto struct
-
-		msg := getProto(int(f.MessageId))
-
-		// Parse data
-
-		err = proto.Unmarshal(f.Data, msg)
-
-		if err != nil {
-			fmt.Println("Parse error", err)
-			continue
-		}
-
-		// Handle msg
-
-		fmt.Println(f.MessageId, msg)
 	}
+
+	fmt.Println("Session drop failed. Did not locate session.")
 }

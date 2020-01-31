@@ -1,15 +1,15 @@
 syntax = "proto3";
 package pcol;
 
-message Frame {
-    int32 messageId = 1;
-    bytes data = 2;
-}
-
 // Server => Client
 
 message RecvChat {
     string username = 1;
+    string message = 2;
+}
+
+message RecvBroadcast {
+    string sender = 1;
     string message = 2;
 }
 
