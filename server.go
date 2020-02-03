@@ -75,6 +75,15 @@ func handleConn(conn net.Conn) {
 				Username: "Server",
 				Message:  "Failed to send message. Client has not registered.",
 			})
+			return
+		}
+
+		if len(parsed.Message) < 1 {
+			stream.Push(&pcol.RecvBroadcast{
+				Sender:  "Server",
+				Message: "Please type a message.",
+			})
+			return
 		}
 
 		fmt.Println(*session.name, ":", parsed.Message)

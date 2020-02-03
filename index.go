@@ -36,4 +36,5 @@ func initFactory() {
 	factory.RegisterMessage(0, &pcol.RegisterClient{})
 	factory.RegisterMessage(1, &pcol.SendChat{})
 	factory.RegisterMessage(2, &pcol.RecvChat{})
+	factory.RegisterMessage(3, &pcol.RecvBroadcast{})
 }

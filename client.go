@@ -62,8 +62,6 @@ func connServer(addr string) {
 	stream.Subscribe(&pcol.RecvBroadcast{}, func(msg proto.Message) {
 		data := msg.(*pcol.RecvBroadcast)
 
-		fmt.Println("RECV BCAST")
-
 		fmt.Print("[")
 
 		color.Set(color.FgBlue)
